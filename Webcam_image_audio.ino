@@ -1,17 +1,12 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <Preferences.h>
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "fb_gfx.h"
 #include <string.h>
 
-// Library untuk SD Card
-#include <FS.h>
-#include <SD_MMC.h>
-
-// Library yang sudah teruji untuk I2S PDM
-#include "ESP_I2S.h" 
+// Library I2S Low-level (diperlukan untuk streaming data mentah)
+#include "driver/i2s.h" 
 
 // =======================
 // === Konfigurasi Pin Kamera (DFRobot ESP32-S3 AI Camera) ===
@@ -35,12 +30,16 @@
 #define LED_GPIO_NUM 47 
 
 // =======================
-// === Konfigurasi I2S Mikrofon (ESP_I2S.h) ===
+// === Konfigurasi I2S Mikrofon untuk Streaming ===
 // =======================
-#define AUDIO_SAMPLE_RATE     (16000) 
-#define AUDIO_DATA_BIT        I2S_DATA_BIT_WIDTH_16BIT 
-#define CLOCK_PIN             (GPIO_NUM_38)
-#define DATA_PIN              (GPIO_NUM_39)
+#define I2S_PORT            I2S_NUM_0
+#define I2S_SAMPLE_RATE     (16000) 
+#define I2S_DATA_BIT        I2S_BITS_PER_SAMPLE_16BIT 
+#define I2S_CHANNEL_FORMAT  I2S_CHANNEL_FMT_ONLY_RIGHT 
+#define I2S_MODE            (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX) // Hapus PDM dari mode
+#define CLOCK_PIN           (GPIO_NUM_38)
+#define DATA_PIN            (GPIO_NUM_39)
+
 
 // ===========================
 // === KREDENSIAL WIFI DEFAULT ===
@@ -51,18 +50,18 @@ const char* DEFAULT_PASS = "agil1234";
 // ===========================
 // === Deklarasi Variabel & Prototipe ===
 // ===========================
-Preferences preferences;
+// Hapus Preferences
 bool led_status = false;
 httpd_handle_t stream_httpd = NULL;
-I2SClass i2s_mic; // Inisialisasi I2SClass global
+// Hapus I2SClass i2s_mic
 
 // Prototipe Fungsi HTTP Handler (Wajib extern "C" untuk Linker)
 extern "C" {
     esp_err_t stream_handler(httpd_req_t *req);
     esp_err_t index_handler(httpd_req_t *req);
     esp_err_t led_handler(httpd_req_t *req);
-    esp_err_t capture_handler(httpd_req_t *req); 
-    esp_err_t audio_handler(httpd_req_t *req); 
+    // Hapus capture_handler/audio_handler lama
+    esp_err_t audio_stream_handler(httpd_req_t *req); // Handler untuk Audio Stream
 }
 
 // Prototipe Fungsi Utilitas
@@ -72,101 +71,60 @@ void connectToWiFi(const char* ssid, const char* password);
 void initWiFi();
 void initCamera();
 bool initI2S(); 
-bool initSD();   
-void recordStill(const char *filename); 
-void recordAudio(const char *filename, int duration_sec); 
+// Hapus initSD, recordStill, recordAudio
 
 
 // ======================================
-// === FUNGSI INIT HARDWARE (SD & I2S BARU) ===
+// === FUNGSI INIT HARDWARE (I2S Low-level Safe PDM) ===
 // ======================================
 
-bool initSD() {
-    Serial.print("Inisialisasi SD Card...");
-    if(!SD_MMC.begin()){
-        Serial.println("Gagal! SD Card Mount Failed!");
-        return false;
-    }
-    Serial.printf("Berhasil. Ukuran: %lluMB\n", SD_MMC.cardSize() / (1024 * 1024));
-    return true;
-}
+// Hapus fungsi initSD()
 
 bool initI2S() {
     Serial.print("Inisialisasi I2S Mikrofon...");
     
-    // Set pin PDM Rx
-    i2s_mic.setPinsPdmRx(CLOCK_PIN, DATA_PIN);
+    // Konfigurasi I2S Low-level untuk PDM RX
+    i2s_config_t i2s_config = {
+        .mode = I2S_MODE,
+        .sample_rate = I2S_SAMPLE_RATE,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FORMAT,
+        .communication_format = I2S_COMM_FORMAT_STAND_MSB, // Kunci: Mode PDM yang aman
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 8,
+        .dma_buf_len = 1024,
+        .use_apll = false
+    };
 
-    // Mulai I2S PDM
-    if (!i2s_mic.begin(I2S_MODE_PDM_RX, AUDIO_SAMPLE_RATE, AUDIO_DATA_BIT, I2S_SLOT_MODE_MONO)) {
-        Serial.println("Gagal menginisialisasi I2S PDM RX!");
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = I2S_PIN_NO_CHANGE, 
+        .ws_io_num = CLOCK_PIN, 
+        .data_out_num = I2S_PIN_NO_CHANGE,
+        .data_in_num = DATA_PIN 
+    };
+
+    if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) != ESP_OK) {
+        Serial.println("Gagal menginstal driver I2S!");
         return false;
     }
     
+    if (i2s_set_pin(I2S_NUM_0, &pin_config) != ESP_OK) {
+        Serial.println("Gagal mengatur pin I2S!");
+        return false;
+    }
+
+    // Set clock secara eksplisit
+    if (i2s_set_clk(I2S_NUM_0, I2S_SAMPLE_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO) != ESP_OK) {
+        Serial.println("Gagal mengatur clock I2S!");
+        return false;
+    }
+    
+    i2s_zero_dma_buffer(I2S_NUM_0);
     Serial.println("Berhasil.");
     return true;
 }
 
-// ======================================
-// === FUNGSI REKAM GAMBAR & SUARA BARU ===
-// ======================================
-
-void recordStill(const char *filename) {
-    if (!SD_MMC.cardSize()) {
-        Serial.println("SD Card tidak terdeteksi, Gagal merekam gambar.");
-        return;
-    }
-    // ... (Logika capture photo tetap sama) ...
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) {
-        Serial.println("Camera capture failed!");
-        return;
-    }
-
-    File file = SD_MMC.open(filename, FILE_WRITE);
-    if (!file) {
-        Serial.printf("Gagal membuka file: %s\n", filename);
-    } else {
-        file.write(fb->buf, fb->len);
-        file.close();
-        Serial.printf("Capture saved: %s, Size: %u bytes\n", filename, fb->len);
-    }
-
-    esp_camera_fb_return(fb);
-}
-
-
-void recordAudio(const char *filename, int duration_sec) {
-    if (!SD_MMC.cardSize()) {
-        Serial.println("SD Card tidak terdeteksi, Gagal merekam audio.");
-        return;
-    }
-
-    Serial.printf("Mulai rekam audio selama %d detik ke %s (WAV)... \n", duration_sec, filename);
-    
-    // Gunakan fungsi recordWAV dari ESP_I2S.h yang terbukti berhasil
-    uint8_t *wav_buffer;
-    size_t wav_size;
-    
-    // CATATAN: recordWAV menyimpan ke RAM/PSRAM. Pastikan ada memori yang cukup!
-    wav_buffer = i2s_mic.recordWAV(duration_sec, &wav_size);
-    
-    if (wav_buffer != NULL && wav_size > 44) { // WAV size minimal 44 bytes (header)
-        File file = SD_MMC.open(filename, FILE_WRITE);
-        if (!file) {
-            Serial.printf("Gagal membuka file %s untuk rekaman audio.\n", filename);
-        } else {
-            file.write((uint8_t*)wav_buffer, wav_size);
-            file.close();
-            Serial.printf("Rekaman WAV selesai. Total %u bytes ditulis.\n", wav_size);
-        }
-        // Bebaskan memori yang dialokasikan oleh recordWAV()
-        free(wav_buffer);
-    } else {
-        Serial.println("Gagal merekam audio atau buffer kosong!");
-    }
-}
-
+// Hapus recordStill dan recordAudio
 
 // ========================
 // === FUNGSI DASAR & WIFI ===
@@ -264,13 +222,13 @@ void initCamera(){
 
 
 // =============================
-// === HTML DASHBOARD ===
+// === HTML DASHBOARD (Update untuk Audio Stream) ===
 // =============================
 const char* html_dashboard = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ESP32-CAM Dashboard</title>
+    <title>ESP32-CAM Streamer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background-color: #f0f0f0; margin: 0; padding: 20px; }
@@ -282,8 +240,7 @@ const char* html_dashboard = R"rawliteral(
         .control-button { padding: 12px 25px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s, transform 0.1s; }
         .control-button:active { transform: scale(0.98); }
         #toggleLedBtn { background-color: #007BFF; color: white; }
-        #captureBtn { background-color: #ffc107; color: #333; }
-        #recordBtn { background-color: #dc3545; color: white; }
+        #audioStreamBtn { background-color: #dc3545; color: white; }
         #toggleLedBtn.on { background-color: #28a745; }
         #toggleLedBtn.off { background-color: #dc3545; }
         .status-info { margin-top: 20px; color: #555; }
@@ -292,19 +249,20 @@ const char* html_dashboard = R"rawliteral(
 </head>
 <body>
     <div class="container">
-        <h1>ESP32-CAM Dashboard</h1>
+        <h1>ESP32-S3 Live Streamer</h1>
         <div class="stream-container">
             <img src="/stream" alt="Camera Stream" id="camera-stream"> 
         </div>
         <div class="controls">
             <button id="toggleLedBtn" class="control-button off" onclick="toggleLed()">LED Flash ON/OFF</button>
-            <button id="captureBtn" class="control-button" onclick="captureStill()">Rekam Gambar</button>
-            <button id="recordBtn" class="control-button" onclick="recordAudio()">Rekam Suara (5 Detik)</button>
+            <button id="audioStreamBtn" class="control-button" onclick="startAudioStream()">Start Audio Stream</button>
         </div>
         <div id="message"></div>
         <div class="status-info">
             <p><strong>IP Address:</strong> <span id="ip-address">Loading...</span></p>
         </div>
+        <!-- Elemen Audio tersembunyi yang akan memuat stream mentah -->
+        <audio id="audioPlayer" hidden controls autoplay loop></audio> 
     </div>
     
     <script>
@@ -336,14 +294,29 @@ const char* html_dashboard = R"rawliteral(
             btn.classList.toggle('off', !newState);
         }
 
-        function captureStill() {
-            fetchAction('/capture', 'Gambar berhasil direkam!');
-        }
+        function startAudioStream() {
+            const audioPlayer = document.getElementById('audioPlayer');
+            const audioBtn = document.getElementById('audioStreamBtn');
+            const msgEl = document.getElementById('message');
 
-        function recordAudio() {
-            // Memberi tahu pengguna bahwa rekaman butuh waktu 5 detik
-            document.getElementById('message').innerText = 'Merekam audio 5 detik... JANGAN tutup browser!';
-            fetchAction('/record?duration=5', 'Suara berhasil direkam (5 detik)!');
+            if (audioPlayer.paused || audioPlayer.src === '') {
+                // Mulai streaming
+                audioPlayer.src = 'http://' + window.location.hostname + '/audiostream';
+                audioPlayer.load();
+                audioPlayer.play().then(() => {
+                    audioBtn.innerText = 'Stop Audio Stream';
+                    msgEl.innerText = 'Audio Streaming dimulai. (Catatan: Browser mungkin memerlukan ekstensi untuk memutar RAW PCM)';
+                }).catch(e => {
+                    msgEl.innerText = 'Gagal memutar audio. Browser tidak mendukung format stream atau terjadi konflik.';
+                    console.error("Audio playback error:", e);
+                });
+            } else {
+                // Hentikan streaming
+                audioPlayer.pause();
+                audioPlayer.src = ''; 
+                audioBtn.innerText = 'Start Audio Stream';
+                msgEl.innerText = 'Audio Streaming dihentikan.';
+            }
         }
     </script>
 </body>
@@ -352,7 +325,7 @@ const char* html_dashboard = R"rawliteral(
 
 
 // =============================
-// === Handlers Web Server (TIDAK ADA STATIC) ===
+// === Handlers Web Server ===
 // =============================
 
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -434,52 +407,58 @@ esp_err_t led_handler(httpd_req_t *req){
     return ESP_OK;
 }
 
-esp_err_t capture_handler(httpd_req_t *req){
-    char filename[32];
-    snprintf(filename, sizeof(filename), "/img_%lu.jpg", millis());
-    
-    Serial.printf("Memulai rekam gambar ke %s\n", filename);
-    recordStill(filename);
-    
-    httpd_resp_sendstr_chunk(req, "Gambar berhasil disimpan.");
-    httpd_resp_sendstr_chunk(req, NULL);
-    return ESP_OK;
-}
-
-esp_err_t audio_handler(httpd_req_t *req){
-    int duration = 5; 
-    
-    char* buf;
-    size_t buf_len = httpd_req_get_url_query_len(req) + 1;
-    if (buf_len > 1) {
-        buf = (char*)malloc(buf_len);
-        if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-            char duration_param[8];
-            if (httpd_query_key_value(buf, "duration", duration_param, sizeof(duration_param)) == ESP_OK) {
-                duration = atoi(duration_param);
-                if (duration <= 0 || duration > 30) duration = 5; 
-            }
-        }
-        free(buf);
-    }
-    
-    char filename[32];
-    // Simpan sebagai WAV karena ESP_I2S.h sudah menyertakan header WAV
-    snprintf(filename, sizeof(filename), "/aud_%lu.wav", millis()); 
-
-    httpd_resp_sendstr_chunk(req, "Memulai rekaman audio...");
-    
-    // Fungsi ini menggunakan ESP_I2S.h
-    recordAudio(filename, duration);
-    
-    httpd_resp_sendstr_chunk(req, "\nRekaman audio selesai dan disimpan.");
-    httpd_resp_sendstr_chunk(req, NULL);
-    return ESP_OK;
-}
-
 esp_err_t index_handler(httpd_req_t *req){
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_dashboard, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+
+// =============================
+// === Audio Stream Handler BARU ===
+// =============================
+const size_t AUDIO_BUFFER_SIZE = 1024; // Buffer size for streaming
+
+esp_err_t audio_stream_handler(httpd_req_t *req) {
+    // Tipe MIME RAW PCM 16bit mono 16kHz
+    const char* AUDIO_CONTENT_TYPE = "application/octet-stream";
+    esp_err_t res = httpd_resp_set_type(req, AUDIO_CONTENT_TYPE);
+    if (res != ESP_OK) { return res; }
+
+    // Set header agar browser tahu ini adalah streaming
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=audio.pcm");
+    httpd_resp_set_hdr(req, "Transfer-Encoding", "chunked");
+
+    // Buffer untuk membaca data audio mentah (16-bit, 16kHz)
+    int16_t *audio_buffer = (int16_t *)heap_caps_malloc(AUDIO_BUFFER_SIZE * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!audio_buffer) {
+        Serial.println("Gagal alokasi buffer audio!");
+        return httpd_resp_send_500(req);
+    }
+
+    size_t bytes_read = 0;
+    // Loop streaming audio
+    while (true) {
+        // Baca data dari I2S. Timeout 50ms untuk menghindari Watchdog.
+        // Catatan: I2S PDM pada ESP32-S3 membaca 32-bit (raw) dan mengkonversinya ke 16-bit PCM.
+        // Di sini kita membaca buffer 16-bit langsung setelah I2S diinisialisasi
+        i2s_read(I2S_NUM_0, (void*)audio_buffer, AUDIO_BUFFER_SIZE * sizeof(int16_t), &bytes_read, 50 / portTICK_PERIOD_MS);
+
+        if (bytes_read > 0) {
+            // Kirim chunk data audio mentah
+            res = httpd_resp_send_chunk(req, (const char *)audio_buffer, bytes_read);
+        } else {
+            // Beri waktu untuk menghindari Watchdog jika tidak ada data
+            delay(1); 
+        }
+
+        if (res != ESP_OK) {
+            // Koneksi ditutup oleh klien atau error lain
+            break;
+        }
+    }
+
+    free(audio_buffer);
     return ESP_OK;
 }
 
@@ -489,20 +468,18 @@ esp_err_t index_handler(httpd_req_t *req){
 // ======================================
 void startCameraServer(){
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 6; 
+    config.max_uri_handlers = 4; // Hanya 4 handler (index, stream, led, audiostream)
 
     Serial.printf("Starting web server on port: '%d'\n", config.server_port);
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
         httpd_uri_t stream_uri = { .uri = "/stream", .method = HTTP_GET, .handler = stream_handler, .user_ctx = NULL };
         httpd_uri_t index_uri = { .uri = "/", .method = HTTP_GET, .handler = index_handler, .user_ctx = NULL };
         httpd_uri_t led_uri = { .uri = "/led", .method = HTTP_GET, .handler = led_handler, .user_ctx = NULL };
-        httpd_uri_t capture_uri = { .uri = "/capture", .method = HTTP_GET, .handler = capture_handler, .user_ctx = NULL };
-        httpd_uri_t audio_uri = { .uri = "/record", .method = HTTP_GET, .handler = audio_handler, .user_ctx = NULL };
+        httpd_uri_t audio_uri = { .uri = "/audiostream", .method = HTTP_GET, .handler = audio_stream_handler, .user_ctx = NULL };
         
         httpd_register_uri_handler(stream_httpd, &index_uri);
         httpd_register_uri_handler(stream_httpd, &stream_uri);
         httpd_register_uri_handler(stream_httpd, &led_uri);
-        httpd_register_uri_handler(stream_httpd, &capture_uri);
         httpd_register_uri_handler(stream_httpd, &audio_uri);
     } else {
         Serial.println("Failed to start HTTP server!");
@@ -523,8 +500,8 @@ void setup() {
     // 1. Inisialisasi Hardware
     initCamera();
     setupLedFlash(LED_GPIO_NUM);
-    initSD();      // Inisialisasi SD Card
-    initI2S();     // Menggunakan ESP_I2S.h yang sudah teruji
+    // Hapus initSD()
+    initI2S();     // Menggunakan konfigurasi I2S Low-level
     
     // 2. Koneksi Jaringan
     initWiFi();
