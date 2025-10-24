@@ -6,8 +6,10 @@
 #include "fb_gfx.h"
 #include <string.h>
 
-// Library untuk I2S (Digunakan untuk streaming audio)
-#include "driver/i2s.h" 
+// Library untuk WEBSOCKETS
+#include <WebSocketsServer.h> 
+// Library untuk Audio yang BERHASIL (ESP_I2S.h)
+#include "ESP_I2S.h" 
 
 // =======================
 // === Konfigurasi Pin Kamera (DFRobot ESP32-S3 AI Camera) ===
@@ -33,22 +35,29 @@
 // =======================
 // === Konfigurasi I2S Mikrofon (Audio Stream) ===
 // =======================
-#define I2S_PORT            I2S_NUM_0
 #define I2S_SAMPLE_RATE     (16000) 
-#define I2S_DATA_BIT        I2S_BITS_PER_SAMPLE_16BIT 
-#define I2S_CHANNEL_FORMAT  I2S_CHANNEL_FMT_ONLY_RIGHT 
-#define I2S_MODE            (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX) // Mode PDM (tanpa I2S_MODE_PDM)
+
+// KUNCI STABILITAS: Menggunakan 32-bit untuk inisialisasi I2S (untuk stabilitas PDM frame)
+#define I2S_DATA_BIT        I2S_DATA_BIT_WIDTH_32BIT 
+
+#define I2S_CHANNEL_FORMAT  I2S_SLOT_MODE_MONO // Menggunakan SLOTS MONO untuk ESP_I2S
+
 #define I2S_SCK_IO          GPIO_NUM_38 // PDM Clock
 #define I2S_SD_IO           GPIO_NUM_39 // PDM Data In (DIN)
-#define AUDIO_BUFFER_SIZE   (2048) // Ukuran buffer untuk setiap blok audio
+
+// Ukuran buffer I2S yang akan dibaca dalam handler
+const int AUDIO_BUFFER_SIZE_16BIT = 1024; 
+I2SClass i2s_mic; // Class I2S global
+
+// Instansi WebSocket Server
+WebSocketsServer webSocket = WebSocketsServer(81); // WebSocket akan berjalan di port 81
 
 
 // ===========================
 // === KREDENSIAL WIFI DEFAULT ===
 // ===========================
-// Kredensial diperbarui sesuai permintaan
-const char* DEFAULT_SSID = "ALAYDRUS"; 
-const char* DEFAULT_PASS = "87654321"; 
+const char* DEFAULT_SSID = "seipa"; 
+const char* DEFAULT_PASS = "00000001"; 
 
 // ===========================
 // === Deklarasi Variabel & Prototipe ===
@@ -59,7 +68,7 @@ httpd_handle_t stream_httpd = NULL;
 // Prototipe Fungsi HTTP Handler (Wajib extern "C" untuk Linker)
 extern "C" {
     esp_err_t stream_handler(httpd_req_t *req);
-    esp_err_t audio_stream_handler(httpd_req_t *req); // Handler untuk Audio Stream
+    esp_err_t audio_stream_handler(httpd_req_t *req); 
     esp_err_t index_handler(httpd_req_t *req);
 }
 
@@ -70,6 +79,7 @@ void connectToWiFi(const char* ssid, const char* password);
 void initWiFi();
 void initCamera();
 bool initI2S(); 
+void audioSampleAndSendTask(void *pvParameters); // Task baru untuk audio
 
 
 // ======================================
@@ -78,45 +88,65 @@ bool initI2S();
 
 bool initI2S() {
     Serial.print("Inisialisasi I2S Mikrofon...");
-    i2s_config_t i2s_config = {
-        .mode = I2S_MODE,
-        .sample_rate = I2S_SAMPLE_RATE,
-        .bits_per_sample = I2S_DATA_BIT,
-        .channel_format = I2S_CHANNEL_FORMAT,
-        .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_I2S_MSB), // Menggunakan I2S MSB
-        .intr_alloc_flags = 0,
-        .dma_buf_count = 8,
-        .dma_buf_len = 256, // DIKURANGI DARI 512 ke 256 untuk stabilitas DMA
-        .use_apll = false
-    };
-
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = I2S_SCK_IO,
-        .ws_io_num = I2S_SCK_IO, // WS = CLK untuk PDM
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = I2S_SD_IO
-    };
     
-    if (i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL) != ESP_OK) {
-        Serial.println("Gagal menginstal driver I2S!");
-        return false;
-    }
+    // 1. Set Pin PDM Rx
+    i2s_mic.setPinsPdmRx(I2S_SCK_IO, I2S_SD_IO);
     
-    if (i2s_set_pin(I2S_PORT, &pin_config) != ESP_OK) {
-        Serial.println("Gagal mengatur pin I2S!");
-        return false;
-    }
-    
-    // KUNCI PERBAIKAN: Set clock secara eksplisit setelah pin
-    if (i2s_set_clk(I2S_PORT, I2S_SAMPLE_RATE, I2S_DATA_BIT, I2S_CHANNEL_MONO) != ESP_OK) {
-        Serial.println("Gagal mengatur clock I2S (set_clk)!");
+    // 2. Inisialisasi PDM Receiver menggunakan mode yang terbukti berhasil
+    if (!i2s_mic.begin(I2S_MODE_PDM_RX, I2S_SAMPLE_RATE, I2S_DATA_BIT, I2S_CHANNEL_FORMAT)) {
+        Serial.println("GAGAL: Menginisialisasi I2S PDM RX.");
         return false;
     }
 
-    i2s_zero_dma_buffer(I2S_PORT);
     Serial.println("Berhasil.");
     return true;
 }
+
+// ======================================
+// === TASK AUDIO WEBSOCKET (NEW) ===
+// ======================================
+
+void audioSampleAndSendTask(void *pvParameters) {
+    if (!initI2S()) {
+        Serial.println("Task Audio GAGAL: I2S tidak aktif.");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Buffer 32-bit untuk menerima data mentah dari I2S
+    int32_t buffer_in[AUDIO_BUFFER_SIZE_16BIT * 2]; 
+    size_t bytes_read;
+    
+    Serial.println("Task Audio: Mulai sampling dan kirim via WebSocket.");
+
+    // Loop sampling
+    while (true) {
+        // Baca I2S
+        // Kita membaca 1024 * 4 bytes = 4096 bytes dari buffer I2S 32-bit
+        bytes_read = i2s_mic.readBytes((char *)buffer_in, sizeof(buffer_in)); 
+        
+        if (bytes_read > 0) {
+            
+            // Kita mendapatkan data mentah 32-bit. Kita harus mengkonversinya 
+            // kembali menjadi 16-bit yang benar untuk dikirim ke PC.
+            
+            size_t num_samples = bytes_read / sizeof(int32_t);
+            int16_t buffer_out[num_samples]; // Buffer 16-bit final (alokasi stack kecil)
+
+            for (size_t i = 0; i < num_samples; i++) {
+                // Kalibrasi Bit-Shift (Ambil 16 bit atas dari data 32-bit)
+                buffer_out[i] = (int16_t)(buffer_in[i] >> 16); 
+            }
+            
+            // Kirim data 16-bit melalui WebSocket
+            webSocket.broadcastBIN((uint8_t*)buffer_out, num_samples * sizeof(int16_t));
+        }
+        
+        // KUNCI STABILITAS: taskYIELD() memberikan kesempatan CPU yang paling cepat ke task lain (Video/WiFi)
+        taskYIELD(); 
+    }
+}
+
 
 // ========================
 // === FUNGSI DASAR & WIFI ===
@@ -176,7 +206,7 @@ void initCamera(){
     config.pin_sccb_sda = SIOD_GPIO_NUM;
     config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.pin_pwdn = PWDN_GPIO_NUM;
-    config.pin_reset = RESET_GPIO_NUM;
+    config.pin_reset = RESET_GPIO_NUM; 
     config.xclk_freq_hz = 20000000;
     config.frame_size = FRAMESIZE_VGA; 
     config.pixel_format = PIXFORMAT_JPEG; 
@@ -272,62 +302,11 @@ esp_err_t stream_handler(httpd_req_t *req){
     return res;
 }
 
-// Handler untuk Audio Stream (RAW PCM)
+// Handler DUMMY (Tidak digunakan lagi, hanya untuk mencegah error)
 esp_err_t audio_stream_handler(httpd_req_t *req) {
-    // Ukuran buffer I2S (4 bytes per sampel, 1024 sampel = 4096 bytes)
-    const int buffer_size_32bit = 1024; 
-    // Menggunakan buffer dinamis agar tidak membebani stack
-    int32_t *buffer_in = (int32_t *)malloc(buffer_size_32bit * sizeof(int32_t)); 
-    if (!buffer_in) {
-        // Gagal alokasi, tutup koneksi dengan status error
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    size_t bytes_read;
-    
-    // Header HTTP untuk audio stream RAW PCM
-    httpd_resp_set_type(req, "application/octet-stream");
-    httpd_resp_set_hdr(req, "Connection", "keep-alive");
-    
-    // Loop streaming audio
-    while (true) {
-        // Baca I2S dengan timeout singkat 100ms
-        esp_err_t i2s_err = i2s_read(I2S_PORT, (void *)buffer_in, buffer_size_32bit * sizeof(int32_t), &bytes_read, 100 / portTICK_PERIOD_MS);
-        
-        if (i2s_err == ESP_OK) { // Hanya proses jika I2S read berhasil
-            
-            // HANYA KIRIM CHUNK JIKA ADA DATA YANG DIBACA
-            if (bytes_read > 0) { 
-                size_t num_samples = bytes_read / sizeof(int32_t);
-                
-                // Konversi 32-bit mentah menjadi 16-bit sampel PCM (untuk streaming)
-                int16_t buffer_out[num_samples]; // Alokasi stack kecil
-                for (size_t i = 0; i < num_samples; i++) {
-                    // Ambil 16 bit atas
-                    buffer_out[i] = (int16_t)(buffer_in[i] >> 16); 
-                }
-                
-                // Kirim chunk audio (16-bit * jumlah sampel)
-                if (httpd_resp_send_chunk(req, (const char *)buffer_out, num_samples * sizeof(int16_t)) != ESP_OK) {
-                    break; // Tutup koneksi jika pengiriman chunk gagal
-                }
-                
-                // Tambahkan delay kecil untuk memungkinkan task lain berjalan
-                vTaskDelay(pdMS_TO_TICKS(1)); 
-            }
-        } else if (i2s_err != ESP_ERR_TIMEOUT) {
-            // Jika ada error I2S serius (selain timeout), log dan keluar
-            // Serial.printf("I2S read error: 0x%x\n", i2s_err); // Debugging I2S
-            break; 
-        } else {
-            // Jika hanya timeout (tidak ada data), biarkan loop berlanjut
-            vTaskDelay(pdMS_TO_TICKS(1)); 
-        }
-    }
-
-    // Bebaskan memori buffer dinamis
-    free(buffer_in);
+    const char* dummy_msg = "Audio stream functionality moved to WebSocket Port 81.";
+    httpd_resp_send(req, dummy_msg, HTTPD_RESP_USE_STRLEN);
+    Serial.println("AUDIO: Handler HTTP dipanggil. Redirect ke WS Port 81."); 
     return ESP_OK;
 }
 
@@ -344,28 +323,71 @@ esp_err_t index_handler(httpd_req_t *req){
 
 
 // ======================================
+// === WEBSOCKET EVENT HANDLER ===
+// ======================================
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+    switch(type) {
+        case WStype_CONNECTED:
+            Serial.printf("WS [%u] Klien terhubung dari IP: %s\n", num, webSocket.remoteIP(num).toString().c_str());
+            break;
+        case WStype_DISCONNECTED:
+            Serial.printf("WS [%u] Klien terputus.\n", num);
+            break;
+        case WStype_TEXT:
+            // Hanya untuk debugging
+            Serial.printf("WS [%u] Pesan diterima: %s\n", num, payload);
+            break;
+        case WStype_BIN:
+            // Audio stream seharusnya berjalan satu arah dari ESP32 ke PC
+            break;
+        default:
+            break;
+    }
+}
+
+
+// ======================================
 // === FUNGSI START SERVER ===
 // ======================================
 void startCameraServer(){
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 3; // Video, Audio, Index
+    config.max_uri_handlers = 3; // Video, Audio (dummy), Index
 
-    Serial.printf("Starting web server on port: '%d'\n", config.server_port);
+    // 1. Mulai HTTP Server (Video)
+    Serial.printf("Starting web server (HTTP) on port: '%d'\n", config.server_port);
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-        // 1. Video Stream (MJPEG)
+        // Video Stream
         httpd_uri_t stream_uri = { .uri = "/stream", .method = HTTP_GET, .handler = stream_handler, .user_ctx = NULL };
         httpd_register_uri_handler(stream_httpd, &stream_uri);
         
-        // 2. Audio Stream (RAW PCM 16-bit 16kHz)
+        // Audio Dummy (Menginformasikan klien ke WS Port 81)
         httpd_uri_t audio_uri = { .uri = "/audiostream", .method = HTTP_GET, .handler = audio_stream_handler, .user_ctx = NULL };
         httpd_register_uri_handler(stream_httpd, &audio_uri);
         
-        // 3. Index/Root
+        // Index/Root
         httpd_uri_t index_uri = { .uri = "/", .method = HTTP_GET, .handler = index_handler, .user_ctx = NULL };
         httpd_register_uri_handler(stream_httpd, &index_uri);
     } else {
         Serial.println("Failed to start HTTP server!");
     }
+    
+    // 2. Mulai WebSocket Server (Audio)
+    webSocket.begin();
+    webSocket.onEvent(webSocketEvent);
+    Serial.println("WebSocket Server (Audio) dimulai di Port 81.");
+    
+    // 3. Mulai Task Audio Sampling (FreerTOS)
+    xTaskCreatePinnedToCore(
+        audioSampleAndSendTask,  // Fungsi yang akan dijalankan
+        "AudioTask",             // Nama Task
+        20000,                   // Ukuran stack (bytes) <-- DIPERBAIKI: 20000 bytes
+        NULL,                    // Parameter yang dilewatkan
+        2,                       // Prioritas Task (DIPERBAIKI: Prioritas 2 lebih tinggi dari default 1)
+        NULL,                    // Task handle
+        1                        // Core ID (Pindahkan ke Core 1)
+    );
+    Serial.println("Task Audio Sampling dimulai di Core 1.");
 }
 
 // ========================
@@ -385,19 +407,17 @@ void setup() {
     // 2. Koneksi Jaringan
     initWiFi();
     
-    // 3. Inisialisasi Audio I2S (Dilakukan setelah WiFi agar tidak mengganggu)
-    if(WiFi.status() == WL_CONNECTED) {
-        initI2S(); 
-    }
-    
-    // 4. Mulai Web Server
+    // 3. Mulai Web Server dan Task Audio
     if (WiFi.status() == WL_CONNECTED) {
         startCameraServer();
+        WiFi.setSleep(false); 
     } else {
         Serial.println("Web server will not start due to WiFi connection failure.");
     }
 }
 
 void loop() {
-    delay(10000); // Semua pekerjaan dilakukan di Web Server tasks
+    // WebSocket memerlukan penanganan di loop()
+    webSocket.loop();
+    delay(1); 
 }
