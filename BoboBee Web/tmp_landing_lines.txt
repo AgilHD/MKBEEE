@@ -1,0 +1,211 @@
+     1: import {
+     2:   ArrowRight,
+     3:   Baby,
+     4:   Heart,
+     5:   Moon,
+     6:   Shield,
+     7:   Star,
+     8:   Users,
+     9:   Wifi
+    10: } from 'lucide-react';
+    11: import React from 'react';
+    12: import { Link } from 'react-router-dom';
+    13: import { Button } from '../components/ui/button';
+    14: import { Card, CardContent } from '../components/ui/card';
+    15: 
+    16: export function LandingPage() {
+    17:   return (
+    18:     <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-orange-50 to-amber-50">
+    19:       {/* Header */}
+    20:       <header className="container mx-auto px-4 py-6">
+    21:         <nav className="flex items-center justify-between">
+    22:           <div className="flex items-center gap-3">
+    23:             <div className="relative">
+    24:               <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-2xl flex items-center justify-center shadow-lg">
+    25:                 <Baby className="h-6 w-6 text-white" />
+    26:               </div>
+    27:               <div className="absolute -top-1 -right-1 w-4 h-4 bg-orange-400 rounded-full animate-pulse"></div>
+    28:             </div>
+    29:             <div>
+    30:               <h1 className="text-2xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+    31:                 BoBoBee
+    32:               </h1>
+    33:               <p className="text-xs text-amber-600">Smart Sleep Guardian</p>
+    34:             </div>
+    35:           </div>
+    36:           <Link to="/login">
+    37:             <Button className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 text-white shadow-lg">
+    38:               Sign In
+    39:             </Button>
+    40:           </Link>
+    41:         </nav>
+    42:       </header>
+    43: 
+    44:       {/* Hero Section */}
+    45:       <section className="container mx-auto px-4 py-16">
+    46:         <div className="text-center max-w-4xl mx-auto">
+    47:           <div className="mb-8">
+    48:             <div className="inline-flex items-center gap-2 bg-yellow-100 text-yellow-800 px-4 py-2 rounded-full text-sm font-medium mb-6">
+    49:               <Star className="h-4 w-4" />
+    50:               Trusted by 10,000+ Parents Worldwide
+    51:             </div>
+    52:             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+    53:               Sweet Dreams,{' '}
+    54:               <span className="bg-gradient-to-r from-yellow-400 to-amber-500 bg-clip-text text-transparent">
+    55:                 Safe Sleep
+    56:               </span>
+    57:             </h1>
+    58:             <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed">
+    59:               BoBoBee is your intelligent sleep companion that monitors your toddler's sleep position, 
+    60:               environment, and comfort in real-time, ensuring peaceful nights for the whole family.
+    61:             </p>
+    62:           </div>
+    63: 
+    64:           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
+    65:             <Link to="/login">
+    66:               <Button size="lg" className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 text-white shadow-xl px-12 py-4 text-lg font-semibold transition-all duration-300 transform hover:scale-105">
+    67:                 Start Monitoring
+    68:                 <ArrowRight className="ml-2 h-5 w-5" />
+    69:               </Button>
+    70:             </Link>
+    71:           </div>
+    72: 
+    73:           {/* Hero Image Placeholder */}
+    74:           <div className="relative max-w-3xl mx-auto">
+    75:             <div className="bg-gradient-to-br from-yellow-100 to-amber-100 rounded-3xl p-8 shadow-2xl">
+    76:               <div className="aspect-video bg-white rounded-2xl shadow-inner flex items-center justify-center">
+    77:                 <div className="text-center">
+    78:                   <div className="w-24 h-24 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+    79:                     <Baby className="h-12 w-12 text-white" />
+    80:                   </div>
+    81:                   <p className="text-gray-600">Live Camera Feed Preview</p>
+    82:                 </div>
+    83:               </div>
+    84:             </div>
+    85:             {/* Floating Elements */}
+    86:             <div className="absolute -top-4 -left-4 w-8 h-8 bg-yellow-400 rounded-lg rotate-12 animate-bounce"></div>
+    87:             <div className="absolute -top-2 -right-6 w-6 h-6 bg-orange-400 rounded-full animate-pulse"></div>
+    88:             <div className="absolute -bottom-4 -right-4 w-10 h-10 bg-amber-400 rounded-xl rotate-45 animate-bounce delay-300"></div>
+    89:           </div>
+    90:         </div>
+    91:       </section>
+    92: 
+    93:       {/* Features Section */}
+    94:       <section className="container mx-auto px-4 py-16">
+    95:         <div className="text-center mb-12">
+    96:           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+    97:             Why Parents Choose BoBoBee
+    98:           </h2>
+    99:           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+   100:             Advanced monitoring technology designed specifically for toddler sleep safety and comfort
+   101:           </p>
+   102:         </div>
+   103: 
+   104:         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+   105:           <FeatureCard
+   106:             icon={<Shield className="h-8 w-8" />}
+   107:             title="Sleep Position Monitoring"
+   108:             description="AI-powered detection ensures your baby sleeps in safe positions with instant alerts for prone positioning."
+   109:             color="from-green-400 to-emerald-500"
+   110:           />
+   111:           <FeatureCard
+   112:             icon={<Heart className="h-8 w-8" />}
+   113:             title="Cry Detection & Response"
+   114:             description="Advanced audio analysis detects different cry patterns and can automatically play soothing sounds."
+   115:             color="from-pink-400 to-rose-500"
+   116:           />
+   117:           <FeatureCard
+   118:             icon={<Wifi className="h-8 w-8" />}
+   119:             title="Real-time Monitoring"
+   120:             description="24/7 live streaming and instant notifications keep you connected wherever you are."
+   121:             color="from-blue-400 to-cyan-500"
+   122:           />
+   123:           <FeatureCard
+   124:             icon={<Moon className="h-8 w-8" />}
+   125:             title="Environment Control"
+   126:             description="Monitor temperature and humidity to maintain the perfect sleep environment for your little one."
+   127:             color="from-purple-400 to-violet-500"
+   128:           />
+   129:           <FeatureCard
+   130:             icon={<Baby className="h-8 w-8" />}
+   131:             title="Sleep Training Support"
+   132:             description="Gentle guidance and insights to help establish healthy sleep patterns and routines."
+   133:             color="from-yellow-400 to-amber-500"
+   134:           />
+   135:           <FeatureCard
+   136:             icon={<Users className="h-8 w-8" />}
+   137:             title="Family Sharing"
+   138:             description="Multiple caregivers can monitor and receive alerts, keeping everyone in the loop."
+   139:             color="from-indigo-400 to-blue-500"
+   140:           />
+   141:         </div>
+   142:       </section>
+   143: 
+   144:       {/* CTA Section */}
+   145:       <section className="container mx-auto px-4 py-16">
+   146:         <Card className="bg-gradient-to-br from-yellow-400 via-amber-400 to-orange-500 border-0 shadow-2xl overflow-hidden relative">
+   147:           <div className="absolute inset-0 bg-black/10"></div>
+   148:           <CardContent className="relative p-8 md:p-12 text-center">
+   149:             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+   150:               Ready to Transform Sleep Time?
+   151:             </h2>
+   152:             <p className="text-lg md:text-xl text-yellow-50 mb-8 max-w-2xl mx-auto leading-relaxed">
+   153:               Join thousands of parents who trust BoBoBee to keep their little ones safe and sound.
+   154:             </p>
+   155:             <div className="flex flex-col sm:flex-row gap-4 justify-center">
+   156:             <Link to="/login">
+   157:               <Button size="lg" className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 text-white shadow-xl px-12 py-4 text-lg font-semibold transition-all duration-300 transform hover:scale-105">
+   158:                 Join With Us !
+   159:                 <ArrowRight className="ml-2 h-5 w-5" />
+   160:               </Button>
+   161:             </Link>
+   162:             </div>
+   163:           </CardContent>
+   164:         </Card>
+   165:       </section>
+   166: 
+   167: 
+   168:       {/* Footer */}
+   169:       <footer className="bg-gray-900 text-white py-12">
+   170:         <div className="container mx-auto px-4">
+   171:           <div className="flex flex-col md:flex-row items-center justify-between">
+   172:             <div className="flex items-center gap-3 mb-4 md:mb-0">
+   173:               <div className="w-10 h-10 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-xl flex items-center justify-center">
+   174:                 <Baby className="h-5 w-5 text-white" />
+   175:               </div>
+   176:               <div>
+   177:                 <h3 className="text-lg font-bold">BoBoBee</h3>
+   178:                 <p className="text-sm text-gray-400">Smart Sleep Guardian</p>
+   179:               </div>
+   180:             </div>
+   181:             <div className="text-center md:text-right">
+   182:               <p className="text-gray-400">© 2025 BoBoBee. All rights reserved.</p>
+   183:               <p className="text-sm text-gray-500">Keeping families safe, one sleep at a time.</p>
+   184:             </div>
+   185:           </div>
+   186:         </div>
+   187:       </footer>
+   188:     </div>
+   189:   );
+   190: }
+   191: 
+   192: interface FeatureCardProps {
+   193:   icon: React.ReactNode;
+   194:   title: string;
+   195:   description: string;
+   196:   color: string;
+   197: }
+   198: 
+   199: function FeatureCard({ icon, title, description, color }: FeatureCardProps) {
+   200:   return (
+   201:     <Card className="group hover:shadow-xl transition-all duration-300 hover:-translate-y-2 border-0 shadow-lg">
+   202:       <CardContent className="p-8 text-center">
+   203:         <div className={`w-16 h-16 bg-gradient-to-br ${color} rounded-2xl flex items-center justify-center mx-auto mb-6 text-white shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+   204:           {icon}
+   205:         </div>
+   206:         <h3 className="text-xl font-bold text-gray-900 mb-4">{title}</h3>
+   207:         <p className="text-gray-600 leading-relaxed">{description}</p>
+   208:       </CardContent>
+   209:     </Card>
+   210:   );
+   211: }

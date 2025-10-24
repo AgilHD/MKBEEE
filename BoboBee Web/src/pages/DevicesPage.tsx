@@ -17,13 +17,17 @@ export function DevicesPage() {
   const [isPairing, setIsPairing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Mock data loading
+  // Real device loading - single device DEV00
   React.useEffect(() => {
-    const mockDevices: Device[] = [
-      MockDataGenerator.generateDevice('DEVTEST1234'),
-      MockDataGenerator.generateDevice('DEVPROD5678'),
-    ];
-    setDevices(mockDevices);
+    const realDevice: Device = {
+      id: 'DEV00',
+      name: 'BOBOBEE TestType',
+      status: 'ONLINE',
+      firmwareVersion: '2.1.4',
+      lastSeen: new Date(),
+      ownerId: 'user123',
+    };
+    setDevices([realDevice]);
   }, [setDevices]);
 
   const handlePairDevice = async (data: { deviceId: string; claimCode?: string }) => {
@@ -88,44 +92,15 @@ export function DevicesPage() {
           </div>
         )}
 
-        {devices.length === 0 ? (
-          <Card className="mx-auto max-w-md text-center py-8 bg-white/90 backdrop-blur-sm shadow-lg border-0">
-            <CardContent>
-              <div className="space-y-3">
-                <div className="text-5xl">🤖</div>
-                <div>
-                  <h3 className="text-base font-semibold mb-1">No devices connected</h3>
-                  <p className="text-muted-foreground text-sm mb-3">
-                    Connect your first BoBoBee device using Device ID or scan QR code
-                  </p>
-                  <Button
-                    onClick={() => setPairingDialogOpen(true)}
-                    className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 shadow-md"
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Your First Device
-                  </Button>
-                </div>
+        <div className="mx-auto max-w-md">
+          <div className="flex justify-center">
+            {devices.map((device) => (
+              <div key={device.id} className="w-full max-w-sm">
+                <DeviceCard device={device} onClick={() => handleDeviceClick(device)} />
               </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="mx-auto max-w-5xl">
-            <div
-              className="
-                grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3
-                gap-4 lg:gap-5 justify-items-center
-              "
-            >
-              {devices.map((device) => (
-                <div key={device.id} className="w-full max-w-sm">
-                  <DeviceCard device={device} onClick={() => handleDeviceClick(device)} />
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
-        )}
+        </div>
 
         <PairDeviceDialog
           open={pairingDialogOpen}
@@ -196,7 +171,7 @@ function DeviceCard({ device, onClick }: DeviceCardProps) {
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 bg-red-500 rounded-full" />
                   <WifiOff className="h-4 w-4 text-red-500" />
-                  <span className="text-xs text-red-700 font-medium">Offline</span>
+                  <span className="text-xs text-red-700 font-medium">Offline</span>  
                 </div>
               )}
 
@@ -227,3 +202,6 @@ function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode 
     </div>
   );
 }
+
+
+

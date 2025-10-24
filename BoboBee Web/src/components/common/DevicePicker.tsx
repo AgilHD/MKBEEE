@@ -1,11 +1,10 @@
+import { ChevronDown } from 'lucide-react';
 import React from 'react';
-import { ChevronDown, Wifi, WifiOff } from 'lucide-react';
 import { Device } from '../../shared/types';
+import { cn } from '../../shared/utils';
 import { useDeviceStore } from '../../state/stores/useDeviceStore';
-import { DEVICE_STATUS_COLORS } from '../../shared/constants';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { cn } from '../../shared/utils';
 
 interface DevicePickerProps {
   devices: Device[];
@@ -26,11 +25,6 @@ export function DevicePicker({ devices, className }: DevicePickerProps) {
         className="min-w-[200px] justify-between border-amber-200 hover:bg-amber-50 hover:border-amber-300 transition-colors bg-white/90 backdrop-blur-sm"
       >
         <div className="flex items-center gap-2">
-          {wsConnected ? (
-            <Wifi className="h-4 w-4 text-green-500" />
-          ) : (
-            <WifiOff className="h-4 w-4 text-red-500" />
-          )}
           <span>{selectedDevice?.name || 'Select Device'}</span>
           {selectedDevice && (
             <Badge 

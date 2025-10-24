@@ -53,7 +53,7 @@ export function PairDeviceDialog({
     try {
       // In a real implementation, this would use the camera API
       // For now, we'll simulate QR code scanning
-      const mockQRData = "bobobee://pair?device=DEVTEST1234&code=ABC123";
+      const mockQRData = "bobobee://pair?device=DEV123456789&code=ABC123";
       
       // Parse QR code data
       const url = new URL(mockQRData);

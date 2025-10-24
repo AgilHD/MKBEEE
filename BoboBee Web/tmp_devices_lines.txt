@@ -1,0 +1,229 @@
+     1: import { Clock, Home, Plus, Settings, Wifi, WifiOff } from 'lucide-react';
+     2: import React from 'react';
+     3: import { useNavigate } from 'react-router-dom';
+     4: import { PairDeviceDialog } from '../components/pairing/PairDeviceDialog';
+     5: import { Badge } from '../components/ui/badge';
+     6: import { Button } from '../components/ui/button';
+     7: import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+     8: import { MockDataGenerator } from '../infrastructure/repositories/MockDataGenerator';
+     9: import { Device } from '../shared/types';
+    10: import { cn, formatTimestamp } from '../shared/utils';
+    11: import { useDeviceStore } from '../state/stores/useDeviceStore';
+    12: 
+    13: export function DevicesPage() {
+    14:   const navigate = useNavigate();
+    15:   const { devices, setDevices, setSelectedDevice } = useDeviceStore();
+    16:   const [pairingDialogOpen, setPairingDialogOpen] = React.useState(false);
+    17:   const [isPairing, setIsPairing] = React.useState(false);
+    18:   const [error, setError] = React.useState<string | null>(null);
+    19: 
+    20:   // Mock data loading
+    21:   React.useEffect(() => {
+    22:     const mockDevices: Device[] = [
+    23:       MockDataGenerator.generateDevice('DEV123456789'),
+    24:       MockDataGenerator.generateDevice('DEV987654321'),
+    25:     ];
+    26:     setDevices(mockDevices);
+    27:   }, [setDevices]);
+    28: 
+    29:   const handlePairDevice = async (data: { deviceId: string; claimCode?: string }) => {
+    30:     setIsPairing(true);
+    31:     setError(null);
+    32: 
+    33:     try {
+    34:       // Simulate pairing process
+    35:       await new Promise(resolve => setTimeout(resolve, 800));
+    36: 
+    37:       // Add new device
+    38:       const newDevice = MockDataGenerator.generateDevice(data.deviceId);
+    39:       newDevice.status = 'ONLINE'; // Successfully paired
+    40:       setDevices([...devices, newDevice]);
+    41:     } catch (error) {
+    42:       setError('Failed to pair device. Please check the Device ID and try again.');
+    43:       throw error;
+    44:     } finally {
+    45:       setIsPairing(false);
+    46:     }
+    47:   };
+    48: 
+    49:   const handleDeviceClick = (device: Device) => {
+    50:     setSelectedDevice(device.id);
+    51:     navigate(`/d/${device.id}`);
+    52:   };
+    53: 
+    54:   return (
+    55:     <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-amber-50 to-orange-50">
+    56:       <div className="mx-auto max-w-5xl px-4 py-6">
+    57:         {/* Header */}
+    58:         <div className="flex flex-col items-center text-center gap-3 mb-6">
+    59:           <Button
+    60:             variant="ghost"
+    61:             onClick={() => navigate('/landing')}
+    62:             className="flex items-center gap-2 text-amber-700 hover:text-amber-800 hover:bg-amber-50 transition-colors"
+    63:           >
+    64:             <Home className="h-4 w-4" />
+    65:             Back to Home
+    66:           </Button>
+    67: 
+    68:           <h1 className="text-3xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+    69:             Your Devices
+    70:           </h1>
+    71:           <p className="text-amber-700/70 text-sm">
+    72:             Manage and monitor your BoBoBee devices
+    73:           </p>
+    74: 
+    75:           <Button
+    76:             onClick={() => setPairingDialogOpen(true)}
+    77:             className="mt-1 bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 shadow-md transition-all duration-200"
+    78:             size="sm"
+    79:           >
+    80:             <Plus className="h-4 w-4 mr-2" />
+    81:             Add Device
+    82:           </Button>
+    83:         </div>
+    84: 
+    85:         {error && (
+    86:           <div className="mx-auto max-w-md mb-5 p-3 text-red-700 bg-red-50 border border-red-200 rounded-xl shadow-sm text-sm">
+    87:             {error}
+    88:           </div>
+    89:         )}
+    90: 
+    91:         {devices.length === 0 ? (
+    92:           <Card className="mx-auto max-w-md text-center py-8 bg-white/90 backdrop-blur-sm shadow-lg border-0">
+    93:             <CardContent>
+    94:               <div className="space-y-3">
+    95:                 <div className="text-5xl">🤖</div>
+    96:                 <div>
+    97:                   <h3 className="text-base font-semibold mb-1">No devices connected</h3>
+    98:                   <p className="text-muted-foreground text-sm mb-3">
+    99:                     Connect your first BoBoBee device using Device ID or scan QR code
+   100:                   </p>
+   101:                   <Button
+   102:                     onClick={() => setPairingDialogOpen(true)}
+   103:                     className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 shadow-md"
+   104:                     size="sm"
+   105:                   >
+   106:                     <Plus className="h-4 w-4 mr-2" />
+   107:                     Add Your First Device
+   108:                   </Button>
+   109:                 </div>
+   110:               </div>
+   111:             </CardContent>
+   112:           </Card>
+   113:         ) : (
+   114:           <div className="mx-auto max-w-5xl">
+   115:             <div
+   116:               className="
+   117:                 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3
+   118:                 gap-4 lg:gap-5 justify-items-center
+   119:               "
+   120:             >
+   121:               {devices.map((device) => (
+   122:                 <div key={device.id} className="w-full max-w-sm">
+   123:                   <DeviceCard device={device} onClick={() => handleDeviceClick(device)} />
+   124:                 </div>
+   125:               ))}
+   126:             </div>
+   127:           </div>
+   128:         )}
+   129: 
+   130:         <PairDeviceDialog
+   131:           open={pairingDialogOpen}
+   132:           onOpenChange={setPairingDialogOpen}
+   133:           onSubmit={handlePairDevice}
+   134:           isLoading={isPairing}
+   135:         />
+   136:       </div>
+   137:     </div>
+   138:   );
+   139: }
+   140: 
+   141: interface DeviceCardProps {
+   142:   device: Device;
+   143:   onClick: () => void;
+   144: }
+   145: 
+   146: function DeviceCard({ device, onClick }: DeviceCardProps) {
+   147:   const isOnline = device.status === 'ONLINE';
+   148: 
+   149:   return (
+   150:     <Card
+   151:       className={cn(
+   152:         'h-full cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-1 bg-white/95 backdrop-blur-sm border-0 shadow-md',
+   153:         !isOnline && 'opacity-80'
+   154:       )}
+   155:       onClick={onClick}
+   156:     >
+   157:       <CardHeader className="pb-2">
+   158:         <div className="flex items-center justify-between gap-2">
+   159:           <CardTitle className="text-base">{device.name}</CardTitle>
+   160:           <Badge
+   161:             className={cn(
+   162:               'text-[10px] font-medium px-2.5 py-0.5 rounded-full',
+   163:               device.status === 'ONLINE' && 'bg-green-100 text-green-700 border border-green-200',
+   164:               device.status === 'OFFLINE' && 'bg-gray-100 text-gray-700 border border-gray-200',
+   165:               device.status === 'PAIRING' && 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+   166:             )}
+   167:           >
+   168:             {device.status}
+   169:           </Badge>
+   170:         </div>
+   171:       </CardHeader>
+   172: 
+   173:       <CardContent className="pt-0">
+   174:         <div className="space-y-2">
+   175:           <Row label="Device ID" value={<span className="font-mono">{device.id}</span>} />
+   176:           <Row label="Firmware" value={`v${device.firmwareVersion}`} />
+   177:           <Row
+   178:             label={
+   179:               <span className="flex items-center gap-1">
+   180:                 <Clock className="h-3 w-3" />
+   181:                 Last seen
+   182:               </span>
+   183:             }
+   184:             value={formatTimestamp(device.lastSeen)}
+   185:           />
+   186: 
+   187:           <div className="pt-2 mt-1 border-t">
+   188:             <div className="flex items-center gap-2">
+   189:               {isOnline ? (
+   190:                 <div className="flex items-center gap-2">
+   191:                   <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+   192:                   <Wifi className="h-4 w-4 text-green-500" />
+   193:                   <span className="text-xs text-green-700 font-medium">Connected</span>
+   194:                 </div>
+   195:               ) : (
+   196:                 <div className="flex items-center gap-2">
+   197:                   <span className="w-2 h-2 bg-red-500 rounded-full" />
+   198:                   <WifiOff className="h-4 w-4 text-red-500" />
+   199:                   <span className="text-xs text-red-700 font-medium">Offline</span>
+   200:                 </div>
+   201:               )}
+   202: 
+   203:               <Button
+   204:                 variant="ghost"
+   205:                 size="icon"
+   206:                 className="ml-auto h-7 w-7 hover:bg-amber-50 hover:text-amber-600 transition-colors"
+   207:                 onClick={(e) => {
+   208:                   e.stopPropagation();
+   209:                   // Handle settings click
+   210:                 }}
+   211:               >
+   212:                 <Settings className="h-3.5 w-3.5" />
+   213:               </Button>
+   214:             </div>
+   215:           </div>
+   216:         </div>
+   217:       </CardContent>
+   218:     </Card>
+   219:   );
+   220: }
+   221: 
+   222: function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
+   223:   return (
+   224:     <div className="flex items-center justify-between text-sm">
+   225:       <span className="text-muted-foreground">{label}</span>
+   226:       <span className="truncate text-right ml-3">{value}</span>
+   227:     </div>
+   228:   );
+   229: }
