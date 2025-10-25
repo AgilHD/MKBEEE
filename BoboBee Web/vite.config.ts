@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { defineConfig } from 'vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -27,7 +27,7 @@ export default defineConfig({
       // ---- ESP32-S3 camera ----
       // Map /esp/* -> http://10.98.128.243/*
       '/esp': {
-        target: 'http://10.98.128.243',   // GANTI kalau IP ESP berubah
+        target: 'http://10.127.225.243/',   // GANTI kalau IP ESP berubah
         changeOrigin: true,
         secure: false,
         ws: false,
