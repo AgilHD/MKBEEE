@@ -5,110 +5,179 @@
 #include <esp_err.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
 
-// ---- Konfigurasi DHT22 ----
-#define DHTPIN 4        // sesuaikan dengan pin GPIO yang dipakai
+// =======================
+// --- Konfigurasi TFT ---
+// =======================
+#define TFT_CS   5
+#define TFT_DC   2
+#define TFT_RST  14
+#define TFT_SCLK 18
+#define TFT_MOSI 13
+
+SPIClass spiTFT = SPIClass(HSPI);
+Adafruit_ST7735 tft = Adafruit_ST7735(&spiTFT, TFT_CS, TFT_DC, TFT_RST);
+
+// =======================
+// --- Konfigurasi DHT ---
+// =======================
+#define DHTPIN 4
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// MAC ESP8266 (receiver) punyamu
-uint8_t TARGET_8266_MAC[6] = { 0x84, 0x0D, 0x8E, 0xB8, 0x37, 0x16 };
-
-// (opsional) broadcast peer untuk diagnosa
-uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+// =======================
+// --- MAC Receiver ---
+// =======================
+uint8_t TARGET_8266_MAC[6] = {0x38, 0x18, 0x2B, 0x80, 0x59, 0x68};
+uint8_t BCAST[6]           = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 const uint8_t ESPNOW_CH = 1;
 
-// Payload: counter + suhu + kelembaban
+// =======================
+// --- Struktur Data ---
+// =======================
 typedef struct __attribute__((packed)) {
   uint32_t counter;
   float suhu;
   float kelembaban;
 } Payload;
 
-// Callback jika data terkirim (ESP-IDF v5.x style untuk ESP32-S3)
+// =======================
+// --- Variabel Global ---
+// =======================
+uint32_t counter = 0;
+uint32_t lastChange = 0;
+uint32_t expressionInterval = 500; // 0.5 detik
+int currentExpression = 0;
+uint32_t lastSend = 0;
+
+// =======================
+// --- Callback Send ---
+// =======================
 void onSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
-  Serial.print("[CB] Packet sent -> ");
-  if (info) {
-    const uint8_t *mac = info->des_addr; // <-- gunakan des_addr
-    for (int i = 0; i < 6; i++) {
-      if (i) Serial.print(":");
-      Serial.printf("%02X", mac[i]);
-    }
-  } else {
-    Serial.print("NULL_ADDR");
-  }
-  Serial.printf(" | Status: %s\n", status == ESP_NOW_SEND_SUCCESS ? "SUCCESS" : "FAIL");
+  Serial.printf("[CB] Send %s\n", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
 }
 
+// =======================
+// --- Tambah Peer ---
+// =======================
 void addPeer(const uint8_t mac[6], uint8_t ch) {
   if (esp_now_is_peer_exist(mac)) esp_now_del_peer(mac);
   esp_now_peer_info_t p{};
   memcpy(p.peer_addr, mac, 6);
   p.channel = ch;
   p.encrypt = false;
-  esp_err_t e = esp_now_add_peer(&p);
-  Serial.printf("add_peer %02X:%02X:%02X:%02X:%02X:%02X ch=%u -> %s (%d)\n",
-                mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], ch, esp_err_to_name(e), e);
+  esp_now_add_peer(&p);
 }
 
+// =======================
+// --- Gambar Ekspresi ---
+// =======================
+void drawFace(int mode) {
+  uint16_t bg = tft.color565(20, 25, 35);
+  uint16_t eyeColor = tft.color565(0, 255, 255);
+  uint16_t mouthColor = tft.color565(0, 255, 180);
+  tft.fillScreen(bg);
+
+  int eyeSize = 45;
+  int eyeY = 40;
+  int leftX = 35;
+  int rightX = 35 + eyeSize + 15;
+  int radius = 10;
+
+  if (mode == 0) {
+    // 😀 Senyum
+    tft.fillRoundRect(leftX, eyeY, eyeSize, eyeSize, radius, eyeColor);
+    tft.fillRoundRect(rightX, eyeY, eyeSize, eyeSize, radius, eyeColor);
+    tft.drawLine(65, 115, 105, 115, mouthColor);
+    tft.drawLine(65, 116, 105, 116, mouthColor);
+  } 
+  else if (mode == 1) {
+    // 😲 Terkejut
+    tft.fillRoundRect(leftX, eyeY, eyeSize, eyeSize, radius, eyeColor);
+    tft.fillRoundRect(rightX, eyeY, eyeSize, eyeSize, radius, eyeColor);
+    tft.drawCircle(85, 115, 8, mouthColor);
+  } 
+  else if (mode == 2) {
+    // 😬 Gemas (>_<)
+    // Mata kiri: ">" (dua garis miring ke dalam)
+    tft.drawLine(leftX, eyeY + 10, leftX + 20, eyeY + 22, eyeColor);  // garis bawah
+    tft.drawLine(leftX, eyeY + 22, leftX + 20, eyeY + 34, eyeColor);  // garis atas
+
+    // Mata kanan: "<" (dua garis miring ke dalam)
+    tft.drawLine(rightX + 20, eyeY + 10, rightX, eyeY + 22, eyeColor);
+    tft.drawLine(rightX + 20, eyeY + 34, rightX, eyeY + 22, eyeColor);
+
+    // Mulut: garis pendek horizontal
+    tft.drawLine(75, 115, 95, 115, mouthColor);
+  } 
+  else if (mode == 3) {
+    // 😑 Kedip
+    tft.fillRect(leftX, eyeY + eyeSize/2, eyeSize, 4, eyeColor);
+    tft.fillRect(rightX, eyeY + eyeSize/2, eyeSize, 4, eyeColor);
+    tft.drawLine(70, 115, 100, 115, mouthColor);
+  }
+}
+
+
+// =======================
+// --- Setup ---
+// =======================
 void setup() {
   Serial.begin(115200);
-  delay(100);
-
-  // Inisialisasi DHT22
   dht.begin();
 
-  // 1) Start Wi-Fi STA benar-benar ON
+  spiTFT.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(10, 30);
+  tft.println("ESP32-S3 Face Sender");
+  delay(1000);
+
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);
   esp_wifi_start();
   esp_wifi_set_ps(WIFI_PS_NONE);
-
-  // 2) Kunci channel (HARUS sama dengan receiver)
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_channel(ESPNOW_CH, WIFI_SECOND_CHAN_NONE);
   esp_wifi_set_promiscuous(false);
-
-  // 3) Init ESPNOW + callback
-  esp_err_t e = esp_now_init();
-  Serial.printf("esp_now_init -> %s (%d)\n", esp_err_to_name(e), e);
-  if (e != ESP_OK) while(true){}
-  // daftar callback (pakai signature wifi_tx_info_t)
+  esp_now_init();
   esp_now_register_send_cb(onSent);
-
-  // 4) Tambah peer unicast + broadcast (diagnosa)
   addPeer(TARGET_8266_MAC, ESPNOW_CH);
   addPeer(BCAST, ESPNOW_CH);
 
-  Serial.println("Sender ready (ESP32 + DHT22).");
+  drawFace(0);
 }
 
+// =======================
+// --- Loop ---
+// =======================
 void loop() {
-  static uint32_t counter = 0;
+  uint32_t now = millis();
 
-  // --- Baca sensor DHT22 ---
-  float suhu = dht.readTemperature();     // Celcius
-  float hum  = dht.readHumidity();
-
-  // Jika gagal baca sensor
-  if (isnan(suhu) || isnan(hum)) {
-    Serial.println("Gagal baca DHT22!");
-    delay(2000);
-    return;
+  if (now - lastChange > expressionInterval) {
+    lastChange = now;
+    if (currentExpression == 3) currentExpression = 0;
+    else if (random(0, 10) < 2) currentExpression = random(1, 3);
+    else if (random(0, 10) < 3) currentExpression = 3;
+    else currentExpression = 0;
+    drawFace(currentExpression);
   }
 
-  // Siapkan payload
-  Payload p{ counter++, suhu, hum };
-
-  // Kirim unicast ke ESP8266
-  esp_err_t rc1 = esp_now_send(TARGET_8266_MAC, (uint8_t*)&p, sizeof(p));
-  Serial.printf("[TX] unicast -> %s (%d) ctr=%lu | suhu=%.2f | hum=%.2f\n",
-                esp_err_to_name(rc1), rc1, p.counter, p.suhu, p.kelembaban);
-
-  // Kirim broadcast (opsional, untuk diagnosa)
-  esp_err_t rc2 = esp_now_send(BCAST, (uint8_t*)&p, sizeof(p));
-  Serial.printf("[TX] broadcast -> %s (%d)\n", esp_err_to_name(rc2), rc2);
-
-  delay(2000); // baca DHT tiap 2 detik
+  if (now - lastSend > 2000) {
+    lastSend = now;
+    float suhu = dht.readTemperature();
+    float hum = dht.readHumidity();
+    if (!isnan(suhu) && !isnan(hum)) {
+      Payload p{ counter++, suhu, hum };
+      esp_now_send(TARGET_8266_MAC, (uint8_t*)&p, sizeof(p));
+      esp_now_send(BCAST, (uint8_t*)&p, sizeof(p));
+      Serial.printf("[TX] #%lu Suhu=%.2fC | Hum=%.2f%%\n", p.counter, suhu, hum);
+    }
+  }
 }
