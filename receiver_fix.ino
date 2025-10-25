@@ -1,79 +1,96 @@
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_mac.h>     // 🔥 ganti esp_wifi.h, diperlukan untuk esp_read_mac()
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>   // Library LCD I2C
+#include <LiquidCrystal_I2C.h>
 
-extern "C" {
-  #include <espnow.h>
-  #include <user_interface.h>
-}
+// --- Konfigurasi LCD ---
+#define SDA_PIN 21
+#define SCL_PIN 17
+LiquidCrystal_I2C lcd(0x27, 16, 2); // alamat umum 0x27
 
-// --- Struktur data payload ---
-typedef struct _attribute_((packed)) { 
-  uint32_t counter;  
-  float suhu;        // misalnya suhu
-  float kelembaban;  // misalnya kelembaban
+// --- Struktur data ---
+typedef struct __attribute__((packed)) {
+  uint32_t counter;
+  float suhu;
+  float kelembaban;
 } Payload;
 
-LiquidCrystal_I2C lcd(0x27, 16, 2); // alamat I2C biasanya 0x27 atau 0x3F
+Payload incomingData;
 
-// --- Callback ketika data diterima ---
-void onRecv(uint8_t *mac, uint8_t *incomingData, uint8_t len){
-  Payload p{};
-  memcpy(&p, incomingData, min((int)len, (int)sizeof(Payload)));
+// --- Callback baru untuk ESP-NOW (sesuai IDF v5) ---
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr),
+           "%02X:%02X:%02X:%02X:%02X:%02X",
+           info->src_addr[0], info->src_addr[1], info->src_addr[2],
+           info->src_addr[3], info->src_addr[4], info->src_addr[5]);
 
-  Serial.printf("[RX] from %02X:%02X:%02X:%02X:%02X:%02X | ch=%d | len=%u | ctr=%lu | suhu=%.2f | hum=%.2f\n",
-                mac[0],mac[1],mac[2],mac[3],mac[4],mac[5], 
-                wifi_get_channel(), len, p.counter, p.suhu, p.kelembaban);
+  Serial.printf("\n📩 Data dari %s | %d bytes\n", macStr, len);
 
-  // --- Tampilkan di LCD ---
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Suhu : ");
-  lcd.print(p.suhu,1);   // 1 angka di belakang koma
-  lcd.print(" C");
+  if (len == sizeof(Payload)) {
+    memcpy(&incomingData, data, sizeof(incomingData));
+    Serial.printf("➡ Counter: %lu | 🌡 %.2f °C | 💧 %.2f %%\n",
+                  incomingData.counter,
+                  incomingData.suhu,
+                  incomingData.kelembaban);
 
-  lcd.setCursor(0,1);
-  lcd.print("Hum  : ");
-  lcd.print(p.kelembaban,1);
-  lcd.print(" %");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Temp: ");
+    lcd.print(incomingData.suhu, 1);
+    lcd.print(" C");
+
+    lcd.setCursor(0, 1);
+    lcd.print("Hum: ");
+    lcd.print(incomingData.kelembaban, 1);
+    lcd.print(" %");
+  } else {
+    Serial.println("⚠ Ukuran data tidak cocok!");
+  }
 }
 
-void forceChannel(uint8_t ch){
-  wifi_promiscuous_enable(1);
-  wifi_set_channel(ch);
-  wifi_promiscuous_enable(0);
-}
-
-void setup(){
+void setup() {
   Serial.begin(115200);
+  delay(500);
+  Serial.println("\n📡 ESP32-D Receiver + LCD I2C");
 
-  // --- LCD init ---
+  // --- Inisialisasi LCD ---
+  Wire.begin(SDA_PIN, SCL_PIN);
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0,0);
-  lcd.print("ESP8266 Ready");
+  lcd.setCursor(0, 0);
+  lcd.print("Receiver Ready");
 
-  WiFi.persistent(false);
+  // --- Mode WiFi STA ---
   WiFi.mode(WIFI_STA);
-  WiFi.setSleepMode(WIFI_NONE_SLEEP);
-  forceChannel(1); // harus match ESPNOW_CH di ESP sender
+  WiFi.disconnect();
+  WiFi.persistent(false);
+  WiFi.setSleep(false);
 
-  if (esp_now_init() != 0){ 
-    Serial.println("ESP-NOW init failed"); 
-    lcd.setCursor(0,1);
+  // --- Ambil MAC Address valid ---
+  uint8_t macAddr[6];
+  esp_read_mac(macAddr, ESP_MAC_WIFI_STA); // ✅ benar untuk IDF v5
+  Serial.printf("ESP32 MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                macAddr[0], macAddr[1], macAddr[2],
+                macAddr[3], macAddr[4], macAddr[5]);
+
+  // --- Inisialisasi ESP-NOW ---
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("❌ ESP-NOW init gagal!");
+    lcd.setCursor(0, 1);
     lcd.print("ESPNOW FAIL");
-    while(true){} 
+    while (true) delay(1000);
   }
-  esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
-  esp_now_register_recv_cb(onRecv);
 
-  Serial.printf("ESP8266 MAC: %s | listening on CH=%d\n", WiFi.macAddress().c_str(), wifi_get_channel());
+  esp_now_register_recv_cb(onDataRecv);
+  Serial.println("✅ Receiver siap menerima data DHT22!");
 }
 
-void loop(){
-  static unsigned long t=0;
-  if (millis()-t >= 2000){ 
-    Serial.println("(listening...)"); 
-    t = millis(); 
+void loop() {
+  static unsigned long t = 0;
+  if (millis() - t >= 2000) {
+    Serial.println("(listening...)");
+    t = millis();
   }
 }
