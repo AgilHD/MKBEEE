@@ -15,7 +15,7 @@
 #define TFT_CS   5
 #define TFT_DC   2
 #define TFT_RST  14
-#define TFT_SCLK 18
+#define TFT_SCLK 12
 #define TFT_MOSI 13
 
 SPIClass spiTFT = SPIClass(HSPI);
@@ -38,7 +38,7 @@ const uint8_t ESPNOW_CH = 1;
 // =======================
 // --- Struktur Data ---
 // =======================
-typedef struct __attribute__((packed)) {
+typedef struct _attribute_((packed)) {
   uint32_t counter;
   float suhu;
   float kelembaban;
@@ -178,6 +178,6 @@ void loop() {
       esp_now_send(TARGET_8266_MAC, (uint8_t*)&p, sizeof(p));
       esp_now_send(BCAST, (uint8_t*)&p, sizeof(p));
       Serial.printf("[TX] #%lu Suhu=%.2fC | Hum=%.2f%%\n", p.counter, suhu, hum);
-    }
-  }
+    }
+  }
 }
