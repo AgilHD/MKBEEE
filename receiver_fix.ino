@@ -20,7 +20,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // ==========================
 // Struktur Data
 // ==========================
-typedef struct __attribute__((packed)) {
+typedef struct _attribute_((packed)) {
   uint8_t type;           // 0 = suhu/kelembapan | 1 = cry detect
   uint32_t counter;
   float suhu;
