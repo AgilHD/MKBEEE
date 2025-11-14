@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_mac.h>
+#include <esp_wifi.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <driver/i2s.h>
@@ -17,10 +18,14 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define I2S_LRC  25
 #define I2S_DOUT 22
 
+// Pakai channel yang sama dgn sender (lihat Serial sender: "Channel WiFi: 8")
+const uint8_t ESPNOW_CH = 8;
+
 // ==========================
 // Struktur Data
 // ==========================
-typedef struct _attribute_((packed)) {
+// Harus sama dengan yang dipakai sender untuk paket cry
+typedef struct __attribute__((packed)) {
   uint8_t type;           // 0 = suhu/kelembapan | 1 = cry detect
   uint32_t counter;
   float suhu;
@@ -72,7 +77,7 @@ void playTone(float freq, int dur_ms, float volume = 0.4f) {
   int total_samples = (sample_rate * dur_ms) / 1000;
 
   for (int i = 0; i < total_samples; i++) {
-    float sample = sin(2.0f * PI * freq * i / sample_rate);
+    float sample = sinf(2.0f * PI * freq * i / sample_rate);
     int16_t s = (int16_t)(sample * amplitude);
     size_t written;
     i2s_write(I2S_NUM_0, &s, sizeof(s), &written, portMAX_DELAY);
@@ -109,7 +114,7 @@ void checkAndTriggerAlarm() {
     else if (cryDetected)
       lcd.print("👶 BABY CRY!");
     playAlarm();
-  } 
+  }
   else if (!trigger && alarmTriggered) {
     alarmTriggered = false;
     Serial.println("✅ Alarm reset");
@@ -125,13 +130,15 @@ void checkAndTriggerAlarm() {
 void addPeerIfNew(const uint8_t *mac) {
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, mac, 6);
-  peerInfo.channel = 0;
+  peerInfo.channel = ESPNOW_CH;        // samakan dengan channel radio kita
   peerInfo.encrypt = false;
 
   if (!esp_now_is_peer_exist(mac)) {
     if (esp_now_add_peer(&peerInfo) == ESP_OK) {
       Serial.printf("🟢 Peer baru: %02X:%02X:%02X:%02X:%02X:%02X\n",
                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+      Serial.println("⚠ Gagal menambah peer");
     }
   }
 }
@@ -151,9 +158,9 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
 
   if (len == 12) {
     // --- Data dari sender DHT22 ---
-    memcpy(&incomingData.counter, data, 4);
-    memcpy(&incomingData.suhu, data + 4, 4);
-    memcpy(&incomingData.kelembaban, data + 8, 4);
+    memcpy(&incomingData.counter,   data,      4);
+    memcpy(&incomingData.suhu,      data + 4,  4);
+    memcpy(&incomingData.kelembaban,data + 8,  4);
     incomingData.type = 0;
     incomingData.cry_detected = false;
 
@@ -172,7 +179,6 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     lcd.print(incomingData.kelembaban, 1);
     lcd.print(" %");
   }
-
   else if (len == sizeof(Payload)) {
     // --- Data dari sender Cry Detection ---
     memcpy(&incomingData, data, sizeof(incomingData));
@@ -184,7 +190,6 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     lcd.setCursor(0, 0);
     lcd.print(cryDetected ? "👶 Baby Crying!" : "No Cry Detected");
   }
-
   else {
     Serial.printf("⚠ Ukuran data tidak dikenal: %d bytes\n", len);
   }
@@ -209,10 +214,16 @@ void setup() {
 
   setupI2S();
 
+  // WiFi / ESP-NOW radio
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   WiFi.persistent(false);
   WiFi.setSleep(false);
+
+  // >>> PENTING: paksa channel radio ke 8 <<<
+  esp_wifi_start();
+  esp_wifi_set_channel(ESPNOW_CH, WIFI_SECOND_CHAN_NONE);
+  Serial.printf("ESP-NOW channel set to %d\n", ESPNOW_CH);
 
   uint8_t macAddr[6];
   esp_read_mac(macAddr, ESP_MAC_WIFI_STA);
