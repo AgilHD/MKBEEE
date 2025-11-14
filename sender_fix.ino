@@ -38,7 +38,7 @@ const uint8_t ESPNOW_CH = 1;
 // =======================
 // --- Struktur Data ---
 // =======================
-typedef struct _attribute_((packed)) {
+typedef struct __attribute__((packed)) {
   uint32_t counter;
   float suhu;
   float kelembaban;
